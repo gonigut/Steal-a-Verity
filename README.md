@@ -30,7 +30,16 @@
 
 Весь баланс (цены, доход, шансы появления, время защиты) меняется в [`src/shared/Config.luau`](src/shared/Config.luau).
 
-## Запуск
+## Запуск без Rojo (проще всего)
+
+1. Скачайте файл [`StealAVerity.rbxlx`](StealAVerity.rbxlx) (на GitHub: **Download raw file**).
+2. Дважды щёлкните по нему, он откроется в Roblox Studio со всеми скриптами.
+3. Нажмите **File → Publish to Roblox** (нужно для сохранения данных).
+4. Настройте игру (см. ниже) и нажмите **Play**.
+
+Если изменили код в `src/`, пересоберите файл: `python3 tools/build_rbxlx.py`.
+
+## Запуск через Rojo
 
 Нужны [Rojo](https://rojo.space) и Roblox Studio.
 

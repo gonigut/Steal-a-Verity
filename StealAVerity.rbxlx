@@ -1,0 +1,1576 @@
+<roblox version="4"><Item class="Workspace" referent="RBX1"><Properties><string name="Name">Workspace</string></Properties></Item><Item class="ReplicatedStorage" referent="RBX5"><Properties><string name="Name">ReplicatedStorage</string></Properties><Item class="Folder" referent="RBX4"><Properties><string name="Name">Shared</string></Properties><Item class="ModuleScript" referent="RBX2"><Properties><string name="Name">Config</string><ProtectedString name="Source"><![CDATA[-- Все настройки баланса игры в одном месте.
+local Config = {}
+
+Config.StartMoney = 100
+Config.SlotCount = 10 -- мест для Verity на базе
+Config.SlotColumns = 5
+Config.SellRatio = 0.5 -- сколько цены возвращается при продаже
+
+Config.ConveyorSpeed = 12 -- студов в секунду
+Config.ConveyorSpawnInterval = 3 -- секунд между появлением Verity
+
+Config.WalkSpeed = 16
+Config.CarrySpeed = 12 -- скорость вора с добычей
+Config.StealHoldSeconds = 2 -- сколько держать кнопку, чтобы украсть
+
+Config.SlapCooldown = 1.5
+Config.SlapRange = 9
+Config.StunSeconds = 1.5
+
+Config.LockDuration = 30 -- сколько секунд работает защита базы
+Config.LockCooldown = 45 -- перезарядка защиты после её окончания
+
+Config.Rarities = {
+	Common = { Name = "Обычный", Color = Color3.fromRGB(205, 205, 205), Order = 1 },
+	Uncommon = { Name = "Необычный", Color = Color3.fromRGB(110, 225, 110), Order = 2 },
+	Rare = { Name = "Редкий", Color = Color3.fromRGB(80, 165, 255), Order = 3 },
+	Epic = { Name = "Эпический", Color = Color3.fromRGB(195, 105, 255), Order = 4 },
+	Legendary = { Name = "Легендарный", Color = Color3.fromRGB(255, 205, 50), Order = 5 },
+	Mythic = { Name = "Мифический", Color = Color3.fromRGB(255, 85, 125), Order = 6 },
+	Secret = { Name = "СЕКРЕТНЫЙ", Color = Color3.fromRGB(255, 255, 255), Order = 7 },
+}
+
+-- Price — цена на конвейере, Income — доход в секунду, Weight — шанс появления (больше = чаще).
+Config.Verities = {
+	{ Id = "red", Name = "Красный Verity", Color = Color3.fromRGB(235, 64, 52), Rarity = "Common", Price = 50, Income = 2, Weight = 25 },
+	{ Id = "blue", Name = "Синий Verity", Color = Color3.fromRGB(52, 120, 235), Rarity = "Common", Price = 80, Income = 3, Weight = 25 },
+	{ Id = "green", Name = "Зелёный Verity", Color = Color3.fromRGB(60, 200, 90), Rarity = "Uncommon", Price = 250, Income = 8, Weight = 15 },
+	{ Id = "yellow", Name = "Жёлтый Verity", Color = Color3.fromRGB(250, 220, 50), Rarity = "Uncommon", Price = 400, Income = 12, Weight = 12 },
+	{ Id = "orange", Name = "Оранжевый Verity", Color = Color3.fromRGB(255, 150, 40), Rarity = "Rare", Price = 1500, Income = 40, Weight = 8 },
+	{ Id = "purple", Name = "Фиолетовый Verity", Color = Color3.fromRGB(150, 80, 230), Rarity = "Rare", Price = 2500, Income = 65, Weight = 6 },
+	{ Id = "pink", Name = "Розовый Verity", Color = Color3.fromRGB(255, 130, 200), Rarity = "Epic", Price = 10000, Income = 220, Weight = 4 },
+	{ Id = "black", Name = "Чёрный Verity", Color = Color3.fromRGB(35, 35, 40), Rarity = "Epic", Price = 20000, Income = 400, Weight = 2.5 },
+	{ Id = "gold", Name = "Золотой Verity", Color = Color3.fromRGB(255, 200, 40), Rarity = "Legendary", Price = 100000, Income = 2000, Weight = 1.5 },
+	{ Id = "ice", Name = "Ледяной Verity", Color = Color3.fromRGB(90, 230, 250), Rarity = "Mythic", Price = 500000, Income = 11000, Weight = 0.8 },
+	{ Id = "rainbow", Name = "Радужный Verity", Color = Color3.fromRGB(255, 255, 255), Rarity = "Secret", Price = 5000000, Income = 150000, Weight = 0.2, Rainbow = true },
+}
+
+Config.ById = {}
+for _, def in Config.Verities do
+	def.RarityInfo = Config.Rarities[def.Rarity]
+	Config.ById[def.Id] = def
+end
+
+return Config
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX3"><Properties><string name="Name">Format</string><ProtectedString name="Source"><![CDATA[local Format = {}
+
+local SUFFIXES = { "", "K", "M", "B", "T", "Qa", "Qi" }
+
+function Format.Number(n)
+	n = math.floor(n)
+	if n < 1000 then
+		return tostring(n)
+	end
+	local tier = math.min(math.floor(math.log10(n) / 3), #SUFFIXES - 1)
+	local value = n / 10 ^ (tier * 3)
+	local text = string.format(value < 10 and "%.2f" or value < 100 and "%.1f" or "%.0f", value)
+	if string.find(text, ".", 1, true) then
+		text = string.gsub(text, "0+$", "")
+		text = string.gsub(text, "%.$", "")
+	end
+	return text .. SUFFIXES[tier + 1]
+end
+
+function Format.Money(n)
+	return "$" .. Format.Number(n)
+end
+
+return Format
+]]></ProtectedString></Properties></Item></Item></Item><Item class="ServerScriptService" referent="RBX16"><Properties><string name="Name">ServerScriptService</string></Properties><Item class="Folder" referent="RBX15"><Properties><string name="Name">Server</string></Properties><Item class="ModuleScript" referent="RBX6"><Properties><string name="Name">Bases</string><ProtectedString name="Source"><![CDATA[-- Базы игроков: места, размещение Verity, касса с доходом, защита ворот, продажа.
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+local Format = require(ReplicatedStorage.Shared.Format)
+local Remotes = require(script.Parent.Remotes)
+local VerityFactory = require(script.Parent.VerityFactory)
+
+local Bases = {}
+
+local list = {}
+local byPlayer = {}
+local deps = {} -- Data, OnSteal(player, base, slot, model)
+
+local function updateStashLabel(base)
+	base.StashLabel.Text = "💰 КАССА\n" .. Format.Money(base.Stash)
+end
+
+function Bases.IncomeOf(base)
+	local total = 0
+	for _, entry in base.Placed do
+		total += Config.ById[entry.Id].Income
+	end
+	return total
+end
+
+local function refreshIncome(base)
+	if base.Owner then
+		base.Owner:SetAttribute("Income", Bases.IncomeOf(base))
+	end
+end
+
+local function setLocked(base, locked)
+	base.Locked = locked
+	base.Gate.CanCollide = locked
+	base.Gate.Transparency = locked and 0.45 or 1
+	for _, entry in base.Placed do
+		entry.Model:SetAttribute("Locked", locked)
+	end
+end
+
+local function collect(base, hit)
+	local player = Players:GetPlayerFromCharacter(hit.Parent)
+	if not player or player ~= base.Owner or base.Stash < 1 then
+		return
+	end
+	local amount = math.floor(base.Stash)
+	base.Stash -= amount
+	deps.Data.AddMoney(player, amount)
+	Remotes.To(player, "Собрано " .. Format.Money(amount), "good")
+	updateStashLabel(base)
+end
+
+function Bases.Init(world, injected)
+	list = world.Bases
+	deps = injected
+	for _, base in list do
+		base.Owner = nil
+		base.Placed = {} -- [slot] = { Id, Model }
+		base.Locked = false
+		base.LockToken = 0
+		base.ReadyAt = 0
+		base.Stash = 0
+		base.CollectPad.Touched:Connect(function(hit)
+			collect(base, hit)
+		end)
+	end
+
+	task.spawn(function()
+		while true do
+			task.wait(1)
+			for _, base in list do
+				if base.Owner then
+					local income = Bases.IncomeOf(base)
+					if income > 0 then
+						base.Stash += income
+						updateStashLabel(base)
+					end
+				end
+			end
+		end
+	end)
+end
+
+function Bases.OfPlayer(player)
+	return byPlayer[player]
+end
+
+function Bases.FreeSlot(base)
+	for slot = 1, Config.SlotCount do
+		if not base.Placed[slot] then
+			return slot
+		end
+	end
+	return nil
+end
+
+function Bases.PlaceVerity(base, slot, id)
+	local def = Config.ById[id]
+	if not def or base.Placed[slot] or not base.Owner then
+		return false
+	end
+
+	local model = VerityFactory.Build(id)
+	model:PivotTo(base.SlotCFrames[slot])
+	model:SetAttribute("OwnerId", base.Owner.UserId)
+	model:SetAttribute("Locked", base.Locked)
+
+	local body = model.PrimaryPart
+
+	local steal = Instance.new("ProximityPrompt")
+	steal.ActionText = "Украсть"
+	steal.ObjectText = def.Name
+	steal.KeyboardKeyCode = Enum.KeyCode.E
+	steal.HoldDuration = Config.StealHoldSeconds
+	steal.MaxActivationDistance = 10
+	steal.RequiresLineOfSight = false
+	steal:SetAttribute("Kind", "Steal")
+	steal.Triggered:Connect(function(player)
+		deps.OnSteal(player, base, slot, model)
+	end)
+	steal.Parent = body
+	CollectionService:AddTag(steal, "VerityPrompt")
+
+	local sell = Instance.new("ProximityPrompt")
+	sell.ActionText = "Продать за " .. Format.Money(math.floor(def.Price * Config.SellRatio))
+	sell.ObjectText = def.Name
+	sell.KeyboardKeyCode = Enum.KeyCode.F
+	sell.GamepadKeyCode = Enum.KeyCode.ButtonY
+	sell.HoldDuration = 1
+	sell.MaxActivationDistance = 10
+	sell.RequiresLineOfSight = false
+	sell:SetAttribute("Kind", "Sell")
+	sell.Triggered:Connect(function(player)
+		Bases.TrySell(player, base, slot, model)
+	end)
+	sell.Parent = body
+	CollectionService:AddTag(sell, "VerityPrompt")
+
+	model.Parent = base.Model
+	base.Placed[slot] = { Id = id, Model = model }
+
+	local profile = deps.Data.Get(base.Owner)
+	if profile then
+		profile.Slots[tostring(slot)] = id
+	end
+	refreshIncome(base)
+	return true
+end
+
+-- Убирает Verity с места и возвращает его id (или nil).
+function Bases.RemoveVerity(base, slot)
+	local entry = base.Placed[slot]
+	if not entry then
+		return nil
+	end
+	base.Placed[slot] = nil
+	entry.Model:Destroy()
+
+	if base.Owner then
+		local profile = deps.Data.Get(base.Owner)
+		if profile then
+			profile.Slots[tostring(slot)] = nil
+		end
+		refreshIncome(base)
+	end
+	return entry.Id
+end
+
+function Bases.TrySell(player, base, slot, model)
+	if base.Owner ~= player then
+		return
+	end
+	local entry = base.Placed[slot]
+	if not entry or entry.Model ~= model then
+		return
+	end
+	local def = Config.ById[entry.Id]
+	Bases.RemoveVerity(base, slot)
+	local refund = math.floor(def.Price * Config.SellRatio)
+	deps.Data.AddMoney(player, refund)
+	Remotes.To(player, "Продано: " .. def.Name .. " за " .. Format.Money(refund), "info")
+end
+
+function Bases.Assign(player)
+	local base
+	for _, candidate in list do
+		if not candidate.Owner then
+			base = candidate
+			break
+		end
+	end
+	if not base then
+		return nil
+	end
+
+	base.Owner = player
+	byPlayer[player] = base
+	base.Stash = 0
+	base.ReadyAt = 0
+	updateStashLabel(base)
+	base.SignLabel.Text = "🏠 " .. player.DisplayName
+	player:SetAttribute("LockUntil", 0)
+	player:SetAttribute("LockReadyAt", 0)
+	player.RespawnLocation = base.SpawnLocation
+
+	local profile = deps.Data.Get(player)
+	if profile then
+		local saved = {}
+		for key, id in profile.Slots do
+			table.insert(saved, { Slot = tonumber(key), Id = id })
+		end
+		for _, item in saved do
+			Bases.PlaceVerity(base, item.Slot, item.Id)
+		end
+	end
+	refreshIncome(base)
+	return base
+end
+
+function Bases.Release(player)
+	local base = byPlayer[player]
+	if not base then
+		return
+	end
+	byPlayer[player] = nil
+
+	-- Невыбранный доход не пропадает.
+	if base.Stash >= 1 then
+		deps.Data.AddMoney(player, math.floor(base.Stash))
+	end
+
+	for _, entry in base.Placed do
+		entry.Model:Destroy()
+	end
+	base.Placed = {}
+	base.Owner = nil
+	base.Stash = 0
+	base.ReadyAt = 0
+	base.LockToken += 1
+	setLocked(base, false)
+	updateStashLabel(base)
+	base.SignLabel.Text = "Свободно"
+end
+
+function Bases.Lock(player)
+	local base = byPlayer[player]
+	if not base then
+		return
+	end
+	local now = workspace:GetServerTimeNow()
+	if base.Locked or now < base.ReadyAt then
+		return
+	end
+
+	base.ReadyAt = now + Config.LockDuration + Config.LockCooldown
+	player:SetAttribute("LockUntil", now + Config.LockDuration)
+	player:SetAttribute("LockReadyAt", base.ReadyAt)
+	setLocked(base, true)
+	Remotes.To(player, "🔒 База защищена на " .. Config.LockDuration .. " сек!", "good")
+
+	base.LockToken += 1
+	local token = base.LockToken
+	task.delay(Config.LockDuration, function()
+		if base.LockToken == token and base.Locked then
+			setLocked(base, false)
+			if base.Owner then
+				Remotes.To(base.Owner, "🔓 Защита закончилась", "info")
+			end
+		end
+	end)
+end
+
+return Bases
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX7"><Properties><string name="Name">Combat</string><ProtectedString name="Source"><![CDATA[-- Шлёпалка: ближайший игрок рядом роняет добычу и на секунду замирает.
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+local Remotes = require(script.Parent.Remotes)
+
+local Combat = {}
+
+local deps = {} -- Stealing
+local lastSlap = {} -- [Player] = os.clock()
+local stunToken = {} -- [Player] = number
+
+local function stun(target)
+	local char = target.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not hum then
+		return
+	end
+	local token = (stunToken[target] or 0) + 1
+	stunToken[target] = token
+	hum.WalkSpeed = 0
+	hum.JumpHeight = 0
+	task.delay(Config.StunSeconds, function()
+		if stunToken[target] ~= token or not hum.Parent then
+			return
+		end
+		hum.WalkSpeed = deps.Stealing.IsCarrying(target) and Config.CarrySpeed or Config.WalkSpeed
+		hum.JumpHeight = 7.2
+	end)
+end
+
+local function nearestTarget(player, hrp)
+	local best, bestDistance = nil, Config.SlapRange
+	for _, other in Players:GetPlayers() do
+		if other ~= player and other.Character then
+			local otherRoot = other.Character:FindFirstChild("HumanoidRootPart")
+			local otherHum = other.Character:FindFirstChildOfClass("Humanoid")
+			if otherRoot and otherHum and otherHum.Health > 0 then
+				local distance = (otherRoot.Position - hrp.Position).Magnitude
+				if distance <= bestDistance then
+					best, bestDistance = other, distance
+				end
+			end
+		end
+	end
+	return best
+end
+
+local function makeTool()
+	local tool = Instance.new("Tool")
+	tool.Name = "Шлёпалка"
+	tool.ToolTip = "Шлёпни вора, чтобы он выронил Verity!"
+	tool.CanBeDropped = false
+	tool.RequiresHandle = true
+
+	local handle = Instance.new("Part")
+	handle.Name = "Handle"
+	handle.Size = Vector3.new(1, 1, 3.5)
+	handle.Color = Color3.fromRGB(255, 120, 190)
+	handle.Material = Enum.Material.SmoothPlastic
+	handle.CanCollide = false
+	handle.Massless = true
+	handle.Parent = tool
+
+	tool.Activated:Connect(function()
+		local char = tool.Parent
+		local player = char and Players:GetPlayerFromCharacter(char)
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if not player or not hrp then
+			return
+		end
+
+		local now = os.clock()
+		if now - (lastSlap[player] or 0) < Config.SlapCooldown then
+			return
+		end
+		lastSlap[player] = now
+
+		local target = nearestTarget(player, hrp)
+		if not target then
+			return
+		end
+		deps.Stealing.Drop(target)
+		stun(target)
+		Remotes.To(target, "💥 " .. player.DisplayName .. " тебя шлёпнул!", "alert")
+	end)
+
+	return tool
+end
+
+function Combat.Init(injected)
+	deps = injected
+	Players.PlayerRemoving:Connect(function(player)
+		lastSlap[player] = nil
+		stunToken[player] = nil
+	end)
+end
+
+function Combat.GiveTool(player)
+	local backpack = player:WaitForChild("Backpack")
+	if not backpack:FindFirstChild("Шлёпалка") then
+		makeTool().Parent = backpack
+	end
+end
+
+return Combat
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX8"><Properties><string name="Name">Conveyor</string><ProtectedString name="Source"><![CDATA[-- Конвейер: Verity выезжают слева направо, их можно купить, пока они едут.
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+local Format = require(ReplicatedStorage.Shared.Format)
+local Remotes = require(script.Parent.Remotes)
+local VerityFactory = require(script.Parent.VerityFactory)
+
+local Conveyor = {}
+
+local ANNOUNCE_FROM_ORDER = 5 -- с какой редкости объявлять всем (Легендарный и выше)
+
+local belt
+local deps = {} -- Bases, Data
+local items = {}
+local folder
+local totalWeight = 0
+
+local function roll()
+	local r = math.random() * totalWeight
+	for _, def in Config.Verities do
+		r -= def.Weight
+		if r <= 0 then
+			return def
+		end
+	end
+	return Config.Verities[1]
+end
+
+local function itemCFrame(item)
+	local bob = math.sin(os.clock() * 3 + item.Phase) * 0.25
+	local y = belt.TopY + VerityFactory.FeetOffset + bob
+	-- Лицо (-Z) смотрит по ходу движения (+X).
+	return CFrame.new(item.X, y, belt.Z) * CFrame.Angles(0, -math.pi / 2, 0)
+end
+
+function Conveyor.Buy(player, item)
+	if item.Taken then
+		return
+	end
+	local base = deps.Bases.OfPlayer(player)
+	local profile = deps.Data.Get(player)
+	if not base or not profile then
+		return
+	end
+
+	local def = item.Def
+	if profile.Money < def.Price then
+		Remotes.To(player, "Не хватает денег! Нужно " .. Format.Money(def.Price), "bad")
+		return
+	end
+	local slot = deps.Bases.FreeSlot(base)
+	if not slot then
+		Remotes.To(player, "Нет места на базе! Продай кого-нибудь (кнопка F у своего Verity).", "bad")
+		return
+	end
+
+	item.Taken = true
+	item.Model:Destroy()
+	deps.Data.AddMoney(player, -def.Price)
+	deps.Bases.PlaceVerity(base, slot, def.Id)
+	Remotes.To(player, "Куплен: " .. def.Name .. "!", "good")
+end
+
+local function spawnItem()
+	local def = roll()
+	local model = VerityFactory.Build(def.Id, { ShowPrice = true })
+	local item = { Def = def, Model = model, X = belt.StartX, Phase = math.random() * math.pi * 2, Taken = false }
+	model:PivotTo(itemCFrame(item))
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Купить за " .. Format.Money(def.Price)
+	prompt.ObjectText = def.Name
+	prompt.HoldDuration = 0.4
+	prompt.MaxActivationDistance = 12
+	prompt.RequiresLineOfSight = false
+	prompt.Triggered:Connect(function(player)
+		Conveyor.Buy(player, item)
+	end)
+	prompt.Parent = model.PrimaryPart
+
+	model.Parent = folder
+	table.insert(items, item)
+
+	if def.RarityInfo.Order >= ANNOUNCE_FROM_ORDER then
+		Remotes.All("✨ На конвейере: " .. def.Name .. " (" .. def.RarityInfo.Name .. ")!", "rare")
+	end
+end
+
+function Conveyor.Init(world, injected)
+	belt = world.Belt
+	deps = injected
+
+	for _, def in Config.Verities do
+		totalWeight += def.Weight
+	end
+
+	folder = Instance.new("Folder")
+	folder.Name = "ConveyorItems"
+	folder.Parent = workspace
+
+	task.spawn(function()
+		while true do
+			spawnItem()
+			task.wait(Config.ConveyorSpawnInterval)
+		end
+	end)
+
+	RunService.Heartbeat:Connect(function(dt)
+		for i = #items, 1, -1 do
+			local item = items[i]
+			if item.Taken then
+				table.remove(items, i)
+			else
+				item.X += Config.ConveyorSpeed * dt
+				if item.X > belt.EndX then
+					item.Model:Destroy()
+					table.remove(items, i)
+				else
+					item.Model:PivotTo(itemCFrame(item))
+				end
+			end
+		end
+	end)
+end
+
+return Conveyor
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX9"><Properties><string name="Name">Data</string><ProtectedString name="Source"><![CDATA[-- Сохранение прогресса игрока: деньги и Verity на базе.
+local DataStoreService = game:GetService("DataStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+
+local STORE_NAME = "StealAVerity_v1"
+local AUTOSAVE_SECONDS = 60
+
+local store = DataStoreService:GetDataStore(STORE_NAME)
+
+local Data = {}
+
+local profiles = {} -- [Player] = { Money = number, Slots = { ["1"] = "red", ... } }
+local canSave = {} -- [Player] = true, только если загрузка прошла успешно
+
+local function keyFor(player)
+	return "Player_" .. player.UserId
+end
+
+local function newProfile()
+	return { Money = Config.StartMoney, Slots = {} }
+end
+
+function Data.Load(player)
+	local ok, result
+	for attempt = 1, 3 do
+		ok, result = pcall(function()
+			return store:GetAsync(keyFor(player))
+		end)
+		if ok then
+			break
+		end
+		task.wait(attempt)
+	end
+
+	local profile = newProfile()
+	if ok then
+		canSave[player] = true
+		if type(result) == "table" then
+			profile.Money = tonumber(result.Money) or profile.Money
+			if type(result.Slots) == "table" then
+				for key, id in result.Slots do
+					local slot = tonumber(key)
+					if slot and slot >= 1 and slot <= Config.SlotCount and Config.ById[id] then
+						profile.Slots[tostring(slot)] = id
+					end
+				end
+			end
+		end
+	else
+		-- Не перезаписываем сохранение пустым профилем, если загрузить не удалось.
+		canSave[player] = false
+		warn("[Data] Не удалось загрузить данные " .. player.Name .. ": " .. tostring(result))
+	end
+
+	profiles[player] = profile
+	player:SetAttribute("Money", profile.Money)
+	return profile
+end
+
+function Data.Get(player)
+	return profiles[player]
+end
+
+function Data.AddMoney(player, delta)
+	local profile = profiles[player]
+	if not profile then
+		return
+	end
+	profile.Money = math.max(0, profile.Money + delta)
+	player:SetAttribute("Money", profile.Money)
+end
+
+function Data.Save(player)
+	local profile = profiles[player]
+	if not profile or not canSave[player] then
+		return false
+	end
+
+	local snapshot = { Money = profile.Money, Slots = table.clone(profile.Slots) }
+	local lastError
+	for attempt = 1, 3 do
+		local ok, err = pcall(function()
+			store:UpdateAsync(keyFor(player), function()
+				return snapshot
+			end)
+		end)
+		if ok then
+			return true
+		end
+		lastError = err
+		task.wait(attempt)
+	end
+	warn("[Data] Не удалось сохранить данные " .. player.Name .. ": " .. tostring(lastError))
+	return false
+end
+
+function Data.Release(player)
+	Data.Save(player)
+	profiles[player] = nil
+	canSave[player] = nil
+end
+
+function Data.SaveAll()
+	local pending = 0
+	for player in profiles do
+		pending += 1
+		task.spawn(function()
+			Data.Save(player)
+			pending -= 1
+		end)
+	end
+	while pending > 0 do
+		task.wait()
+	end
+end
+
+task.spawn(function()
+	while true do
+		task.wait(AUTOSAVE_SECONDS)
+		for player in profiles do
+			task.spawn(Data.Save, player)
+		end
+	end
+end)
+
+return Data
+]]></ProtectedString></Properties></Item><Item class="Script" referent="RBX10"><Properties><string name="Name">Main</string><ProtectedString name="Source"><![CDATA[-- Точка входа сервера: собирает мир и связывает системы между собой.
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local Remotes = require(script.Parent.Remotes)
+local Data = require(script.Parent.Data)
+local World = require(script.Parent.World)
+local Bases = require(script.Parent.Bases)
+local Conveyor = require(script.Parent.Conveyor)
+local Stealing = require(script.Parent.Stealing)
+local Combat = require(script.Parent.Combat)
+
+-- Персонажей создаём сами, чтобы игрок сразу появлялся на своей базе.
+Players.CharacterAutoLoads = false
+
+local world = World.Build()
+Bases.Init(world, {
+	Data = Data,
+	OnSteal = function(player, base, slot, model)
+		Stealing.TrySteal(player, base, slot, model)
+	end,
+})
+Stealing.Init({ Bases = Bases })
+Conveyor.Init(world, { Bases = Bases, Data = Data })
+Combat.Init({ Stealing = Stealing })
+
+Remotes.LockBaseEvent.OnServerEvent:Connect(function(player)
+	Bases.Lock(player)
+end)
+
+local function onCharacterAdded(player, char)
+	local humanoid = char:WaitForChild("Humanoid")
+	Combat.GiveTool(player)
+	humanoid.Died:Connect(function()
+		Stealing.Drop(player)
+		task.wait(Players.RespawnTime)
+		if player.Parent then
+			player:LoadCharacter()
+		end
+	end)
+end
+
+local function onPlayerAdded(player)
+	Data.Load(player)
+	if not player.Parent then
+		Data.Release(player)
+		return
+	end
+
+	local base = Bases.Assign(player)
+	if not base then
+		player:Kick("Сервер заполнен, попробуй зайти на другой!")
+		Data.Release(player)
+		return
+	end
+
+	player.CharacterAdded:Connect(function(char)
+		onCharacterAdded(player, char)
+	end)
+	player:LoadCharacter()
+end
+
+local function onPlayerRemoving(player)
+	-- Порядок важен: сначала возвращаем добычу, потом освобождаем базу, потом сохраняем.
+	Stealing.Drop(player)
+	Bases.Release(player)
+	Data.Release(player)
+end
+
+Players.PlayerAdded:Connect(onPlayerAdded)
+Players.PlayerRemoving:Connect(onPlayerRemoving)
+for _, player in Players:GetPlayers() do
+	task.spawn(onPlayerAdded, player)
+end
+
+game:BindToClose(function()
+	Stealing.DropAll()
+	if RunService:IsStudio() then
+		Data.SaveAll()
+		return
+	end
+	-- На реальном сервере PlayerRemoving сам сохранит каждого; даём ему время.
+	local deadline = os.clock() + 20
+	while #Players:GetPlayers() > 0 and os.clock() < deadline do
+		task.wait(0.2)
+	end
+end)
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX11"><Properties><string name="Name">Remotes</string><ProtectedString name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Remotes = {}
+
+local folder = Instance.new("Folder")
+folder.Name = "Remotes"
+folder.Parent = ReplicatedStorage
+
+local function make(name)
+	local remote = Instance.new("RemoteEvent")
+	remote.Name = name
+	remote.Parent = folder
+	return remote
+end
+
+Remotes.NotifyEvent = make("Notify") -- сервер -> клиент: (text, kind)
+Remotes.LockBaseEvent = make("LockBase") -- клиент -> сервер: включить защиту базы
+
+-- kind: "info" | "good" | "bad" | "alert" | "rare"
+function Remotes.To(player, text, kind)
+	Remotes.NotifyEvent:FireClient(player, text, kind or "info")
+end
+
+function Remotes.All(text, kind)
+	Remotes.NotifyEvent:FireAllClients(text, kind or "info")
+end
+
+return Remotes
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX12"><Properties><string name="Name">Stealing</string><ProtectedString name="Source"><![CDATA[-- Кража: вор забирает Verity с чужой базы и должен донести его до своей.
+-- Если вора шлёпнули, он умер или вышел, Verity возвращается хозяину.
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+local Remotes = require(script.Parent.Remotes)
+local VerityFactory = require(script.Parent.VerityFactory)
+
+local Stealing = {}
+
+local deps = {} -- Bases
+local carrying = {} -- [Player] = { Id, Model, FromUserId, FromSlot, WarnedFull }
+
+local function humanoidOf(player)
+	local char = player.Character
+	return char and char:FindFirstChildOfClass("Humanoid"), char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function inside(base, position)
+	local rel = base.Origin:PointToObjectSpace(position)
+	return math.abs(rel.X) < 22 and math.abs(rel.Z) < 22 and rel.Y > -2 and rel.Y < 20
+end
+
+local function attachCarry(char, hrp, id)
+	local model = VerityFactory.Build(id)
+	model:ScaleTo(0.6)
+	model:PivotTo(hrp.CFrame * CFrame.new(0, 4.2, 0))
+	for _, d in model:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.Anchored = false
+			d.Massless = true
+			d.CanCollide = false
+		end
+	end
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = hrp
+	weld.Part1 = model.PrimaryPart
+	weld.Parent = model.PrimaryPart
+	model.Parent = char
+	return model
+end
+
+function Stealing.Init(injected)
+	deps = injected
+
+	-- Проверяем доставку добычи и живых воров.
+	task.spawn(function()
+		while true do
+			task.wait(0.2)
+			for thief, carry in carrying do
+				local hum, hrp = humanoidOf(thief)
+				if not hum or hum.Health <= 0 or not hrp then
+					Stealing.Drop(thief)
+				else
+					local base = deps.Bases.OfPlayer(thief)
+					if base and inside(base, hrp.Position) then
+						local slot = deps.Bases.FreeSlot(base)
+						if slot then
+							carrying[thief] = nil
+							carry.Model:Destroy()
+							hum.WalkSpeed = Config.WalkSpeed
+							thief:SetAttribute("Carrying", nil)
+							deps.Bases.PlaceVerity(base, slot, carry.Id)
+							Remotes.To(thief, "🎉 Ты украл " .. Config.ById[carry.Id].Name .. "!", "good")
+						elseif not carry.WarnedFull then
+							carry.WarnedFull = true
+							Remotes.To(thief, "Нет места на базе! Продай кого-нибудь (F).", "bad")
+						end
+					end
+				end
+			end
+		end
+	end)
+end
+
+function Stealing.IsCarrying(player)
+	return carrying[player] ~= nil
+end
+
+function Stealing.TrySteal(thief, base, slot, model)
+	local hum, hrp = humanoidOf(thief)
+	if not hum or hum.Health <= 0 or not hrp then
+		return
+	end
+	if carrying[thief] then
+		Remotes.To(thief, "Ты уже несёшь Verity! Беги на свою базу.", "bad")
+		return
+	end
+	local victim = base.Owner
+	if not victim or victim == thief then
+		return
+	end
+	if base.Locked then
+		Remotes.To(thief, "🔒 База защищена!", "bad")
+		return
+	end
+	local entry = base.Placed[slot]
+	if not entry or entry.Model ~= model then
+		return
+	end
+	if (hrp.Position - model:GetPivot().Position).Magnitude > 20 then
+		return
+	end
+	local myBase = deps.Bases.OfPlayer(thief)
+	if not myBase or not deps.Bases.FreeSlot(myBase) then
+		Remotes.To(thief, "Освободи место на своей базе, чтобы украсть!", "bad")
+		return
+	end
+
+	local id = deps.Bases.RemoveVerity(base, slot)
+	local def = Config.ById[id]
+	carrying[thief] = {
+		Id = id,
+		Model = attachCarry(thief.Character, hrp, id),
+		FromUserId = victim.UserId,
+		FromSlot = slot,
+	}
+	thief:SetAttribute("Carrying", id)
+	hum.WalkSpeed = Config.CarrySpeed
+
+	Remotes.To(thief, "Ты схватил " .. def.Name .. "! Беги на свою базу!", "good")
+	Remotes.To(victim, "⚠️ " .. thief.DisplayName .. " украл твоего " .. def.Name .. "! Догони и шлёпни!", "alert")
+end
+
+-- Вор потерял добычу: Verity возвращается хозяину, если он ещё в игре и есть место.
+function Stealing.Drop(thief)
+	local carry = carrying[thief]
+	if not carry then
+		return
+	end
+	carrying[thief] = nil
+	carry.Model:Destroy()
+	thief:SetAttribute("Carrying", nil)
+	local hum = humanoidOf(thief)
+	if hum then
+		hum.WalkSpeed = Config.WalkSpeed
+	end
+
+	local def = Config.ById[carry.Id]
+	Remotes.To(thief, "Ты потерял " .. def.Name .. "!", "bad")
+
+	local owner = Players:GetPlayerByUserId(carry.FromUserId)
+	local ownerBase = owner and deps.Bases.OfPlayer(owner)
+	if not ownerBase then
+		return
+	end
+	local slot = carry.FromSlot
+	if ownerBase.Placed[slot] then
+		slot = deps.Bases.FreeSlot(ownerBase)
+	end
+	if slot and deps.Bases.PlaceVerity(ownerBase, slot, carry.Id) then
+		Remotes.To(owner, "✅ " .. def.Name .. " вернулся на твою базу!", "good")
+	end
+end
+
+function Stealing.DropAll()
+	for thief in carrying do
+		Stealing.Drop(thief)
+	end
+end
+
+return Stealing
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX13"><Properties><string name="Name">VerityFactory</string><ProtectedString name="Source"><![CDATA[-- Собирает модель Verity из обычных частей: милый шарик с глазками и ножками.
+-- Лицо модели смотрит в -Z. Корневая часть (Body) заякорена, остальное приварено к ней.
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+local Format = require(ReplicatedStorage.Shared.Format)
+
+local VerityFactory = {}
+
+-- Расстояние от центра тела до низа ножек: так модель встаёт на пол.
+VerityFactory.FeetOffset = 2.5
+
+local function addPart(model, body, name, shape, size, offset, color, material)
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Shape = shape
+	part.Size = size
+	part.Color = color
+	part.Material = material or Enum.Material.SmoothPlastic
+	part.CanCollide = false
+	part.CanTouch = false
+	part.Massless = true
+	part.Anchored = false
+	part.CFrame = body.CFrame * CFrame.new(offset)
+	part.Parent = model
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = body
+	weld.Part1 = part
+	weld.Parent = part
+	return part
+end
+
+local function addLabelLine(parent, text, color, order, height)
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.new(1, 0, 0, height)
+	label.LayoutOrder = order
+	label.Font = Enum.Font.GothamBold
+	label.TextSize = height - 2
+	label.TextColor3 = color
+	label.TextStrokeTransparency = 0.3
+	label.Text = text
+	label.Parent = parent
+end
+
+local function addInfo(body, def, showPrice)
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "Info"
+	gui.Adornee = body
+	gui.Size = UDim2.fromOffset(200, showPrice and 90 or 66)
+	gui.StudsOffset = Vector3.new(0, 3.8, 0)
+	gui.MaxDistance = 90
+	gui.LightInfluence = 0
+
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+	layout.Parent = gui
+
+	addLabelLine(gui, def.RarityInfo.Name, def.RarityInfo.Color, 1, 20)
+	addLabelLine(gui, def.Name, Color3.new(1, 1, 1), 2, 22)
+	addLabelLine(gui, Format.Money(def.Income) .. "/сек", Color3.fromRGB(120, 255, 140), 3, 22)
+	if showPrice then
+		addLabelLine(gui, "Цена: " .. Format.Money(def.Price), Color3.fromRGB(255, 225, 120), 4, 22)
+	end
+	gui.Parent = body
+end
+
+-- options.ShowPrice — показывать цену (для конвейера)
+function VerityFactory.Build(id, options)
+	options = options or {}
+	local def = Config.ById[id]
+	assert(def, "Unknown verity id: " .. tostring(id))
+
+	local model = Instance.new("Model")
+	model.Name = def.Id
+	model:SetAttribute("VerityId", def.Id)
+
+	local body = Instance.new("Part")
+	body.Name = "Body"
+	body.Shape = Enum.PartType.Ball
+	body.Size = Vector3.new(4, 4, 4)
+	body.Color = def.Color
+	body.Material = def.Rainbow and Enum.Material.Neon or Enum.Material.SmoothPlastic
+	body.CanCollide = false
+	body.Anchored = true
+	body.CFrame = CFrame.new()
+	body.Parent = model
+	model.PrimaryPart = body
+
+	if def.Rainbow then
+		CollectionService:AddTag(body, "RainbowPart")
+	end
+
+	local white = Color3.new(1, 1, 1)
+	local black = Color3.fromRGB(20, 20, 25)
+	local footColor = def.Color:Lerp(Color3.new(0, 0, 0), 0.25)
+	local ball = Enum.PartType.Ball
+	local block = Enum.PartType.Block
+
+	for _, side in { -1, 1 } do
+		addPart(model, body, "Eye", ball, Vector3.new(1.1, 1.1, 1.1), Vector3.new(0.75 * side, 0.6, -1.7), white)
+		addPart(model, body, "Pupil", ball, Vector3.new(0.55, 0.55, 0.55), Vector3.new(0.75 * side, 0.6, -2.15), black)
+		addPart(model, body, "Foot", ball, Vector3.new(1.4, 1.4, 1.4), Vector3.new(0.9 * side, -1.8, -0.4), footColor)
+	end
+	addPart(model, body, "Mouth", block, Vector3.new(0.9, 0.18, 0.1), Vector3.new(0, -0.35, -1.95), black)
+
+	addInfo(body, def, options.ShowPrice == true)
+	return model
+end
+
+return VerityFactory
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX14"><Properties><string name="Name">World</string><ProtectedString name="Source"><![CDATA[-- Строит карту кодом: земля, конвейер посередине и 8 баз (по 4 с каждой стороны).
+-- В локальной системе базы +Z — это "перед" (сторона, обращённая к конвейеру).
+local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Config = require(ReplicatedStorage.Shared.Config)
+
+local World = {}
+
+local BASE_SIZE = 44
+local WALL_HEIGHT = 12
+local GATE_WIDTH = 14
+local BELT_HALF_LENGTH = 130
+local BELT_WIDTH = 12
+
+local BASE_COLORS = {
+	Color3.fromRGB(255, 120, 120),
+	Color3.fromRGB(255, 170, 90),
+	Color3.fromRGB(250, 225, 90),
+	Color3.fromRGB(120, 220, 120),
+	Color3.fromRGB(90, 210, 220),
+	Color3.fromRGB(110, 150, 255),
+	Color3.fromRGB(180, 120, 255),
+	Color3.fromRGB(255, 130, 200),
+}
+
+local function makePart(parent, name, size, cframe, color, material, transparency, collide)
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Anchored = true
+	part.Size = size
+	part.CFrame = cframe
+	part.Color = color
+	part.Material = material or Enum.Material.SmoothPlastic
+	part.Transparency = transparency or 0
+	part.CanCollide = collide ~= false
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Parent = parent
+	return part
+end
+
+local function addBillboard(adornee, text, offsetY, width, height)
+	local gui = Instance.new("BillboardGui")
+	gui.Adornee = adornee
+	gui.Size = UDim2.fromOffset(width, height)
+	gui.StudsOffset = Vector3.new(0, offsetY, 0)
+	gui.MaxDistance = 120
+	gui.LightInfluence = 0
+	gui.Parent = adornee
+
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.fromScale(1, 1)
+	label.Font = Enum.Font.GothamBlack
+	label.TextScaled = true
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.TextStrokeTransparency = 0.2
+	label.Text = text
+	label.Parent = gui
+	return label
+end
+
+local function buildBase(parent, index, origin, color)
+	local model = Instance.new("Model")
+	model.Name = "Base" .. index
+	model.Parent = parent
+
+	local function at(x, y, z)
+		return origin * CFrame.new(x, y, z)
+	end
+
+	local wallColor = color:Lerp(Color3.new(1, 1, 1), 0.45)
+	local half = BASE_SIZE / 2
+	local wallY = 1 + WALL_HEIGHT / 2
+	local frontWidth = (BASE_SIZE - GATE_WIDTH) / 2
+
+	makePart(model, "Floor", Vector3.new(BASE_SIZE, 1, BASE_SIZE), at(0, 0.5, 0), color)
+	makePart(model, "WallBack", Vector3.new(BASE_SIZE, WALL_HEIGHT, 1), at(0, wallY, -half + 0.5), wallColor)
+	makePart(model, "WallLeft", Vector3.new(1, WALL_HEIGHT, BASE_SIZE), at(-half + 0.5, wallY, 0), wallColor)
+	makePart(model, "WallRight", Vector3.new(1, WALL_HEIGHT, BASE_SIZE), at(half - 0.5, wallY, 0), wallColor)
+	makePart(model, "WallFrontL", Vector3.new(frontWidth, WALL_HEIGHT, 1), at(-(GATE_WIDTH + frontWidth) / 2, wallY, half - 0.5), wallColor)
+	makePart(model, "WallFrontR", Vector3.new(frontWidth, WALL_HEIGHT, 1), at((GATE_WIDTH + frontWidth) / 2, wallY, half - 0.5), wallColor)
+
+	-- Ворота: невидимы и проходимы, пока защита выключена.
+	local gate = makePart(
+		model,
+		"Gate",
+		Vector3.new(GATE_WIDTH, WALL_HEIGHT, 1),
+		at(0, wallY, half - 0.5),
+		Color3.fromRGB(255, 70, 70),
+		Enum.Material.Neon,
+		1,
+		false
+	)
+
+	-- Табличка с именем хозяина над воротами (видна снаружи).
+	local sign = makePart(model, "Sign", Vector3.new(18, 4, 1), at(0, 15, half - 0.5), Color3.fromRGB(35, 35, 45))
+	local surface = Instance.new("SurfaceGui")
+	surface.Face = Enum.NormalId.Back
+	surface.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	surface.PixelsPerStud = 40
+	surface.Parent = sign
+	local signLabel = Instance.new("TextLabel")
+	signLabel.BackgroundTransparency = 1
+	signLabel.Size = UDim2.fromScale(1, 1)
+	signLabel.Font = Enum.Font.GothamBlack
+	signLabel.TextScaled = true
+	signLabel.TextColor3 = Color3.new(1, 1, 1)
+	signLabel.Text = "Свободно"
+	signLabel.Parent = surface
+
+	-- Места для Verity.
+	local slotCFrames = {}
+	for i = 1, Config.SlotCount do
+		local col = (i - 1) % Config.SlotColumns
+		local row = (i - 1) // Config.SlotColumns
+		local x = -16 + col * 8
+		local z = -13 + row * 10
+		makePart(model, "Slot" .. i, Vector3.new(6, 0.4, 6), at(x, 1.2, z), Color3.fromRGB(235, 235, 240))
+		-- Вращаем на 180°, чтобы лицо Verity смотрело на ворота.
+		slotCFrames[i] = at(x, 1.4 + 2.5, z) * CFrame.Angles(0, math.pi, 0)
+	end
+
+	-- Касса: сюда стекается доход, надо наступить, чтобы забрать.
+	local collectPad = makePart(model, "CollectPad", Vector3.new(10, 0.4, 6), at(-12, 1.2, 13), Color3.fromRGB(80, 220, 120), Enum.Material.Neon)
+	local stashLabel = addBillboard(collectPad, "💰 КАССА\n$0", 4, 200, 70)
+
+	local spawn = Instance.new("SpawnLocation")
+	spawn.Name = "Spawn"
+	spawn.Anchored = true
+	spawn.Size = Vector3.new(6, 1, 6)
+	spawn.CFrame = at(12, 1.5, 13)
+	spawn.Neutral = true
+	spawn.Duration = 0
+	spawn.Transparency = 0.6
+	spawn.Color = Color3.fromRGB(255, 255, 255)
+	local decal = spawn:FindFirstChildOfClass("Decal")
+	if decal then
+		decal:Destroy()
+	end
+	spawn.Parent = model
+
+	return {
+		Index = index,
+		Origin = origin,
+		Model = model,
+		Gate = gate,
+		SignLabel = signLabel,
+		SlotCFrames = slotCFrames,
+		CollectPad = collectPad,
+		StashLabel = stashLabel,
+		SpawnLocation = spawn,
+	}
+end
+
+function World.Build()
+	local root = Instance.new("Folder")
+	root.Name = "World"
+	root.Parent = workspace
+
+	Lighting.ClockTime = 14
+	Lighting.Brightness = 2
+
+	makePart(root, "Ground", Vector3.new(420, 1, 220), CFrame.new(0, -0.5, 0), Color3.fromRGB(110, 190, 110), Enum.Material.Grass)
+
+	-- Конвейер: верх на высоте y = 1.
+	local belt = makePart(root, "Belt", Vector3.new(BELT_HALF_LENGTH * 2 + 20, 1, BELT_WIDTH), CFrame.new(0, 0.5, 0), Color3.fromRGB(60, 60, 68), Enum.Material.Metal)
+	belt.Name = "Belt"
+	for _, side in { -1, 1 } do
+		makePart(root, "BeltStripe", Vector3.new(BELT_HALF_LENGTH * 2 + 20, 0.2, 0.6), CFrame.new(0, 1.05, side * (BELT_WIDTH / 2 - 0.5)), Color3.fromRGB(255, 220, 60), Enum.Material.Neon, 0, false)
+	end
+
+	local bases = {}
+	local xs = { -90, -30, 30, 90 }
+	for i, x in xs do
+		-- Северный ряд: перед (+Z) смотрит на конвейер.
+		table.insert(bases, buildBase(root, i, CFrame.new(x, 0, -45), BASE_COLORS[i]))
+	end
+	for i, x in xs do
+		-- Южный ряд развёрнут на 180°.
+		table.insert(bases, buildBase(root, i + 4, CFrame.new(x, 0, 45) * CFrame.Angles(0, math.pi, 0), BASE_COLORS[i + 4]))
+	end
+
+	return {
+		Bases = bases,
+		Belt = {
+			StartX = -BELT_HALF_LENGTH,
+			EndX = BELT_HALF_LENGTH,
+			Z = 0,
+			TopY = 1,
+		},
+	}
+end
+
+return World
+]]></ProtectedString></Properties></Item></Item></Item><Item class="StarterPlayer" referent="RBX22"><Properties><string name="Name">StarterPlayer</string></Properties><Item class="StarterPlayerScripts" referent="RBX21"><Properties><string name="Name">StarterPlayerScripts</string></Properties><Item class="Folder" referent="RBX20"><Properties><string name="Name">Client</string></Properties><Item class="LocalScript" referent="RBX17"><Properties><string name="Name">Effects</string><ProtectedString name="Source"><![CDATA[-- Радужный Verity переливается всеми цветами (локально, без нагрузки на сервер).
+local CollectionService = game:GetService("CollectionService")
+local RunService = game:GetService("RunService")
+
+local rainbowParts = {}
+
+local function track(part)
+	rainbowParts[part] = true
+end
+
+for _, part in CollectionService:GetTagged("RainbowPart") do
+	track(part)
+end
+CollectionService:GetInstanceAddedSignal("RainbowPart"):Connect(track)
+CollectionService:GetInstanceRemovedSignal("RainbowPart"):Connect(function(part)
+	rainbowParts[part] = nil
+end)
+
+RunService.RenderStepped:Connect(function()
+	local color = Color3.fromHSV((os.clock() * 0.3) % 1, 0.75, 1)
+	for part in rainbowParts do
+		if part.Parent then
+			part.Color = color
+		else
+			rainbowParts[part] = nil
+		end
+	end
+end)
+]]></ProtectedString></Properties></Item><Item class="LocalScript" referent="RBX18"><Properties><string name="Name">HUD</string><ProtectedString name="Source"><![CDATA[-- Интерфейс: деньги, доход, кнопка защиты базы, плашка «несёшь добычу» и уведомления.
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local Config = require(ReplicatedStorage.Shared:WaitForChild("Config"))
+local Format = require(ReplicatedStorage.Shared:WaitForChild("Format"))
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local KIND_COLORS = {
+	info = Color3.fromRGB(235, 235, 245),
+	good = Color3.fromRGB(120, 255, 140),
+	bad = Color3.fromRGB(255, 130, 120),
+	alert = Color3.fromRGB(255, 190, 70),
+	rare = Color3.fromRGB(255, 225, 90),
+}
+
+local function make(className, props, children)
+	local instance = Instance.new(className)
+	for key, value in props do
+		if key ~= "Parent" then
+			instance[key] = value
+		end
+	end
+	for _, child in children or {} do
+		child.Parent = instance
+	end
+	instance.Parent = props.Parent
+	return instance
+end
+
+local function stroke(thickness)
+	return make("UIStroke", { Thickness = thickness, Color = Color3.new(0, 0, 0) })
+end
+
+local gui = make("ScreenGui", { Name = "VerityHUD", ResetOnSpawn = false, Parent = playerGui })
+
+local moneyLabel = make("TextLabel", {
+	Name = "Money",
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 8),
+	Size = UDim2.fromOffset(280, 50),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBlack,
+	TextScaled = true,
+	TextColor3 = Color3.fromRGB(120, 255, 140),
+	Text = "$0",
+	Parent = gui,
+}, { stroke(2.5) })
+
+local incomeLabel = make("TextLabel", {
+	Name = "Income",
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 58),
+	Size = UDim2.fromOffset(220, 24),
+	BackgroundTransparency = 1,
+	Font = Enum.Font.GothamBold,
+	TextScaled = true,
+	TextColor3 = Color3.fromRGB(255, 255, 255),
+	Text = "+$0/сек",
+	Parent = gui,
+}, { stroke(1.5) })
+
+local carryLabel = make("TextLabel", {
+	Name = "Carry",
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 86),
+	Size = UDim2.fromOffset(420, 30),
+	BackgroundColor3 = Color3.fromRGB(200, 40, 40),
+	BackgroundTransparency = 0.2,
+	Font = Enum.Font.GothamBold,
+	TextSize = 18,
+	TextColor3 = Color3.new(1, 1, 1),
+	Text = "",
+	Visible = false,
+	Parent = gui,
+}, { make("UICorner", { CornerRadius = UDim.new(0, 8) }) })
+
+local toastHolder = make("Frame", {
+	Name = "Toasts",
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 124),
+	Size = UDim2.fromOffset(420, 200),
+	BackgroundTransparency = 1,
+	Parent = gui,
+}, {
+	make("UIListLayout", {
+		Padding = UDim.new(0, 4),
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+	}),
+})
+
+local lockButton = make("TextButton", {
+	Name = "Lock",
+	AnchorPoint = Vector2.new(0, 0.5),
+	Position = UDim2.new(0, 12, 0.5, 0),
+	Size = UDim2.fromOffset(160, 56),
+	BackgroundColor3 = Color3.fromRGB(60, 140, 255),
+	Font = Enum.Font.GothamBold,
+	TextSize = 16,
+	TextWrapped = true,
+	TextColor3 = Color3.new(1, 1, 1),
+	Text = "🔒 Защитить базу",
+	AutoButtonColor = true,
+	Parent = gui,
+}, { make("UICorner", { CornerRadius = UDim.new(0, 12) }), stroke(2) })
+
+lockButton.Activated:Connect(function()
+	Remotes.LockBase:FireServer()
+end)
+
+local function refreshMoney()
+	moneyLabel.Text = Format.Money(player:GetAttribute("Money") or 0)
+end
+
+local function refreshIncome()
+	incomeLabel.Text = "+" .. Format.Money(player:GetAttribute("Income") or 0) .. "/сек"
+end
+
+local function refreshCarry()
+	local def = Config.ById[player:GetAttribute("Carrying")]
+	carryLabel.Visible = def ~= nil
+	if def then
+		carryLabel.Text = "Ты несёшь: " .. def.Name .. "! Беги на свою базу! 🏃"
+	end
+end
+
+player:GetAttributeChangedSignal("Money"):Connect(refreshMoney)
+player:GetAttributeChangedSignal("Income"):Connect(refreshIncome)
+player:GetAttributeChangedSignal("Carrying"):Connect(refreshCarry)
+refreshMoney()
+refreshIncome()
+refreshCarry()
+
+local elapsed = 0
+RunService.Heartbeat:Connect(function(dt)
+	elapsed += dt
+	if elapsed < 0.1 then
+		return
+	end
+	elapsed = 0
+
+	local now = workspace:GetServerTimeNow()
+	local lockUntil = player:GetAttribute("LockUntil") or 0
+	local readyAt = player:GetAttribute("LockReadyAt") or 0
+	if now < lockUntil then
+		lockButton.Text = string.format("🔒 Защита: %dс", math.ceil(lockUntil - now))
+		lockButton.BackgroundColor3 = Color3.fromRGB(70, 200, 110)
+	elseif now < readyAt then
+		lockButton.Text = string.format("Заряжается: %dс", math.ceil(readyAt - now))
+		lockButton.BackgroundColor3 = Color3.fromRGB(110, 110, 125)
+	else
+		lockButton.Text = "🔒 Защитить базу"
+		lockButton.BackgroundColor3 = Color3.fromRGB(60, 140, 255)
+	end
+end)
+
+Remotes.Notify.OnClientEvent:Connect(function(text, kind)
+	local label = make("TextLabel", {
+		Size = UDim2.new(0, 420, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = Color3.fromRGB(20, 20, 30),
+		BackgroundTransparency = 0.25,
+		Font = Enum.Font.GothamBold,
+		TextSize = 18,
+		TextWrapped = true,
+		TextColor3 = KIND_COLORS[kind] or KIND_COLORS.info,
+		Text = text,
+		Parent = toastHolder,
+	}, {
+		make("UICorner", { CornerRadius = UDim.new(0, 8) }),
+		make("UIPadding", { PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 5) }),
+	})
+
+	task.delay(4, function()
+		local tween = TweenService:Create(label, TweenInfo.new(0.4), { TextTransparency = 1, BackgroundTransparency = 1 })
+		tween:Play()
+		tween.Completed:Wait()
+		label:Destroy()
+	end)
+end)
+]]></ProtectedString></Properties></Item><Item class="LocalScript" referent="RBX19"><Properties><string name="Name">Prompts</string><ProtectedString name="Source"><![CDATA[-- Показываем «Украсть» только чужим Verity на незащищённых базах, а «Продать» — только своим.
+-- Это лишь удобство интерфейса: все проверки всё равно делает сервер.
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+
+local function refresh(prompt)
+	local model = prompt:FindFirstAncestorOfClass("Model")
+	if not model then
+		return
+	end
+
+	local mine = model:GetAttribute("OwnerId") == player.UserId
+	local locked = model:GetAttribute("Locked") == true
+	local kind = prompt:GetAttribute("Kind")
+
+	local want
+	if kind == "Steal" then
+		want = not mine and not locked
+	elseif kind == "Sell" then
+		want = mine
+	else
+		return
+	end
+
+	if prompt.Enabled ~= want then
+		prompt.Enabled = want
+	end
+end
+
+local function setup(prompt)
+	task.defer(function()
+		refresh(prompt)
+		local model = prompt:FindFirstAncestorOfClass("Model")
+		if not model then
+			return
+		end
+		-- Сервер мог перезаписать Enabled — применяем своё значение снова.
+		prompt:GetPropertyChangedSignal("Enabled"):Connect(function()
+			refresh(prompt)
+		end)
+		model:GetAttributeChangedSignal("Locked"):Connect(function()
+			refresh(prompt)
+		end)
+		model:GetAttributeChangedSignal("OwnerId"):Connect(function()
+			refresh(prompt)
+		end)
+	end)
+end
+
+for _, prompt in CollectionService:GetTagged("VerityPrompt") do
+	setup(prompt)
+end
+CollectionService:GetInstanceAddedSignal("VerityPrompt"):Connect(setup)
+]]></ProtectedString></Properties></Item></Item></Item></Item></roblox>
